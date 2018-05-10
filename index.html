@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head>
+  <title>Camcorder</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/x-icon" href="data:image/png;base64,">
+  <style>
+body {
+  margin: 0;
+  background: #ffdc00 }
+article.start > * { margin-left: 2rem }
+h1 { font-size: 14vw }
+@media (min-width: 35rem) {
+  h1 { font-size: 5rem } }
+p { font-size: larger }
+a {
+  text-decoration: none;
+  color: black;
+  font-weight: bold;
+  transition: color .2s }
+a:hover { color: #660 }
+video {
+  position: absolute;
+  z-index: -1;
+  width: 100%;
+  height: 100% }
+
+.hide { display: none }
+.button {
+  margin: 5px;
+  background: black;
+  border: none;
+  padding: .3rem .8rem;
+  color: #ffc;
+  cursor: pointer }
+  </style>
+</head>
+<body>
+  <noscript><h6>Only viewable with JavaScript enabled.</h6></noscript>
+  <main>
+    <article class="start">
+      <h1>Camcorder</h1>
+      <p>Video recording one-page app by <a href="https://github.com/ajhamwood/camcorder">Aidan Hamwood</a>.</p>
+      <button class="start-cam button">Start camera</button>
+    </article>
+    <article class="usermedia hide">
+      <video muted></video>
+      <button class="swap-cam button">Switch camera</button>
+      <button class="start-rec button">Start recording</button>
+      <button class="stop-cam button">Stop camera</button>
+      <button class="stop-rec button hide">Stop recording</button>
+    </article>
+    <article class="download hide">
+      <video controls></video>
+      <button class="download-mov button">Download video</button>
+      <button class="discard-mov button">Discard video</button>
+    </article>
+  <script>
+//Utilities
+function $ (sel, node) { return Array.prototype.slice.call( (node || document).querySelectorAll(sel) ) }
+$.addEvents = function (obj, node) {
+  for (var q in obj) for (var e in obj[q])
+    for (var ns = q ? $(q, node) : [window, document], es = e.split(' '), i = 0; i < es.length; i++)
+      typeof ns === 'undefined' || ns.forEach(n => n.addEventListener(es[i], obj[q][e].bind(n))) };
+$.Machine = (function () {
+  let state, events = [], Machine = function (initialState) {
+    if (state) throw 'Machine already initialised';
+    else state = initialState;
+    return this
+  };
+  return Object.assign(Machine, { prototype: {
+    getState: function () { return state },
+    on: function (event, fn) { (events[event] = events[event] || []).push(fn); return this },
+    emit: function (event, ...args) { return events[event] && events[event].reduce((s, fn) => (fn.apply(s, args), s), state) },
+    stop: function (event, fname = '') { events[event] && events[event].splice(events[event].findIndex(fn => fn.name == fname), 1); return this },
+    constructor: Machine
+  } })
+})();
+
+//Usermedia
+function getCameras () {
+  return new Promise((resolve, reject) => {
+    if ('mediaDevices' in navigator) navigator.mediaDevices.enumerateDevices()
+      .then(is => cameras = is.filter(i => i.kind == 'videoinput')).then(resolve);
+    else reject(console.log('Can\'t find a camera'))
+  }).then(c => {
+    switch (c.length) {
+      case 0: throw 'Can\'t find a camera';
+      case 1: break;
+      default: swap = true
+    }
+  })
+}
+
+function startMedia () {
+  if (navigator.mediaDevices.getUserMedia) {
+    return navigator.mediaDevices.getUserMedia({
+      video: { width: 6400, height: 4800, deviceId: { exact: cameras[0].deviceId } },
+      audio: { noiseSuppression: true }
+    }).then((s) => {
+      video.onloadedmetadata = () => video.play();
+      recorder = new MediaRecorder(video.srcObject = stream = s, { mimeType : 'video/webm' });
+      recorder.ondataavailable = e => {
+        let blob = new Blob([e.data], { 'type' : 'video/webm' });
+        $('video')[1].src = (videoURL = URL.createObjectURL(blob));
+      }
+    }).catch(e => {
+      console.log(e.message);
+      machine.emit('changepage', 0);
+      stream.getTracks().forEach(x => x.stop())
+    });
+  } else throw "Can't connect camera"
+}
+
+// Init
+var cameras = [], stream, recorder, video = $('video')[0], videoURL, swap,
+    machine = new $.Machine({ page: 0 })
+      .on('changepage', function (which) {
+        if ([0, 1, 2].includes(which)) {
+          this.page = which;
+          $('article:not(.hide)')[0].classList.add('hide');
+          $('article')[which].classList.remove('hide')
+        }
+      });
+
+//Events
+$.addEvents({
+  '.start-cam': {
+    click: function () {
+      getCameras().then(() => {
+        machine.emit('changepage', 1);
+        $('.swap-cam')[0].classList[swap ? 'remove' : 'add']('hide')
+      }).then(startMedia).then(() => {})
+    }
+  },
+  '.swap-cam': {
+    click: function () {
+      stream.getTracks().forEach(x => x.stop());
+      cameras.unshift(cameras.pop());
+      startMedia()
+    }
+  },
+  '.stop-cam': {
+    click: function () {
+      machine.emit('changepage', 0)
+      stream.getTracks().forEach(x => x.stop());
+      video.srcObject = null
+    }
+  },
+  '.start-rec': {
+    click: function () {
+      $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList.add('hide'));
+      $('.usermedia > .stop-rec')[0].classList.remove('hide');
+      recorder.start()
+    }
+  },
+  '.stop-rec': {
+    click: function () {
+      recorder.stop();
+      stream.getTracks().forEach(x => x.stop());
+      $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList.remove('hide'));
+      $('.usermedia > .stop-rec')[0].classList.add('hide');
+      machine.emit('changepage', 2);
+    }
+  },
+  '.download-mov': {
+    click: function () {
+      let link = document.createElement('a');
+      link.download = 'video.webm';
+      link.href = videoURL.replace('video/webm', 'video/octet-stream');
+      link.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+    }
+  },
+  '.discard-mov': {
+    click: function () {
+      video.src = null;
+      machine.emit('changepage', 0)
+    }
+  }
+})
+  </script>
+</body>
+</html>
