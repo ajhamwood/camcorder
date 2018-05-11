@@ -9,6 +9,20 @@
 body {
   margin: 0;
   background: #ffdc00 }
+header {
+  height: 2rem;
+  background: #ff4136;
+  position: absolute;
+  width: calc(100% - 2rem);
+  top: 0;
+  font: bold large sans-serif;
+  padding: .5rem 0 0 2rem;
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 1s }
+header.flash {
+  transition: opacity 0s;
+  opacity: 1 }
 article.start > * { margin-left: 2rem }
 h1 { font-size: 14vw }
 @media (min-width: 35rem) {
@@ -20,6 +34,13 @@ a {
   font-weight: bold;
   transition: color .2s }
 a:hover { color: #660 }
+button {
+  margin: 5px;
+  background: black;
+  border: none;
+  padding: .3rem .8rem;
+  color: #ffc;
+  cursor: pointer }
 video {
   position: absolute;
   z-index: -1;
@@ -27,34 +48,27 @@ video {
   height: 100% }
 
 .hide { display: none }
-.button {
-  margin: 5px;
-  background: black;
-  border: none;
-  padding: .3rem .8rem;
-  color: #ffc;
-  cursor: pointer }
   </style>
 </head>
 <body>
-  <noscript><h6>Only viewable with JavaScript enabled.</h6></noscript>
   <main>
+    <header></header>
     <article class="start">
       <h1>Camcorder</h1>
       <p>Video recording one-page app by <a href="https://github.com/ajhamwood/camcorder">Aidan Hamwood</a>.</p>
-      <button class="start-cam button">Start camera</button>
+      <button class="start-cam">Start camera</button>
     </article>
     <article class="usermedia hide">
-      <video muted></video>
-      <button class="swap-cam button">Switch camera</button>
-      <button class="start-rec button">Start recording</button>
-      <button class="stop-cam button">Stop camera</button>
-      <button class="stop-rec button hide">Stop recording</button>
+      <video muted></video
+      ><button class="swap-cam">Switch camera</button
+      ><button class="start-rec">Start recording</button
+      ><button class="stop-cam">Stop camera</button
+      ><button class="stop-rec hide">Stop recording</button>
     </article>
     <article class="download hide">
-      <video controls></video>
-      <button class="download-mov button">Download video</button>
-      <button class="discard-mov button">Discard video</button>
+      <video controls></video
+      ><button class="download-mov">Download video</button
+      ><button class="discard-mov">Discard video</button>
     </article>
   <script>
 //Utilities
@@ -69,13 +83,13 @@ $.Machine = (function () {
     else state = initialState;
     return this
   };
-  return Object.assign(Machine, { prototype: {
+  return Object.assign(Machine, {prototype: {
     getState: function () { return state },
     on: function (event, fn) { (events[event] = events[event] || []).push(fn); return this },
     emit: function (event, ...args) { return events[event] && events[event].reduce((s, fn) => (fn.apply(s, args), s), state) },
     stop: function (event, fname = '') { events[event] && events[event].splice(events[event].findIndex(fn => fn.name == fname), 1); return this },
     constructor: Machine
-  } })
+  }})
 })();
 
 //Usermedia
@@ -83,7 +97,7 @@ function getCameras () {
   return new Promise((resolve, reject) => {
     if ('mediaDevices' in navigator) navigator.mediaDevices.enumerateDevices()
       .then(is => cameras = is.filter(i => i.kind == 'videoinput')).then(resolve);
-    else reject(console.log('Can\'t find a camera'))
+    else reject('Camera not supported')
   }).then(c => {
     switch (c.length) {
       case 0: throw 'Can\'t find a camera';
@@ -102,26 +116,35 @@ function startMedia () {
       video.onloadedmetadata = () => video.play();
       recorder = new MediaRecorder(video.srcObject = stream = s, { mimeType : 'video/webm' });
       recorder.ondataavailable = e => {
-        let blob = new Blob([e.data], { 'type' : 'video/webm' });
-        $('video')[1].src = (videoURL = URL.createObjectURL(blob));
+        let blob = new Blob([e.data], { type: 'video/webm' });
+        $('video')[1].src = videoURL = URL.createObjectURL(blob)
       }
-    }).catch(e => {
-      console.log(e.message);
-      machine.emit('changepage', 0);
-      stream.getTracks().forEach(x => x.stop())
-    });
-  } else throw "Can't connect camera"
+    }).catch(e => { throw e.message })
+  } else throw 'Can\'t connect camera'
 }
 
 // Init
 var cameras = [], stream, recorder, video = $('video')[0], videoURL, swap,
-    machine = new $.Machine({ page: 0 })
+    machine = new $.Machine({ page: 0, recording: false })
       .on('changepage', function (which) {
-        if ([0, 1, 2].includes(which)) {
+        if (~[0, 1, 2].indexOf(which)) {
           this.page = which;
           $('article:not(.hide)')[0].classList.add('hide');
           $('article')[which].classList.remove('hide')
         }
+      })
+      .on('changerecordingstate', function (state) {
+        $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList[state ? 'add' : 'remove']('hide'));
+        $('.usermedia > .stop-rec')[0].classList[state ? 'remove' : 'add']('hide')
+      })
+      .on('error', function (msg) {
+        console.log(msg);
+        machine.emit('changepage', 0);
+        stream && stream.getTracks().forEach(x => x.stop());
+        let h = $('header')[0];
+        h.innerText = msg;
+        h.classList.add('flash');
+        setTimeout(() => h.classList.remove('flash'), 5000)
       });
 
 //Events
@@ -131,27 +154,26 @@ $.addEvents({
       getCameras().then(() => {
         machine.emit('changepage', 1);
         $('.swap-cam')[0].classList[swap ? 'remove' : 'add']('hide')
-      }).then(startMedia).then(() => {})
+      }).then(startMedia).catch(e => machine.emit('error', e))
     }
   },
   '.swap-cam': {
     click: function () {
       stream.getTracks().forEach(x => x.stop());
-      cameras.unshift(cameras.pop());
-      startMedia()
+      cameras.push(cameras.shift());
+      startMedia().catch(e => machine.emit('error', e))
     }
   },
   '.stop-cam': {
     click: function () {
-      machine.emit('changepage', 0)
+      machine.emit('changepage', 0);
       stream.getTracks().forEach(x => x.stop());
       video.srcObject = null
     }
   },
   '.start-rec': {
     click: function () {
-      $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList.add('hide'));
-      $('.usermedia > .stop-rec')[0].classList.remove('hide');
+      machine.emit('changerecordingstate', true);
       recorder.start()
     }
   },
@@ -159,26 +181,27 @@ $.addEvents({
     click: function () {
       recorder.stop();
       stream.getTracks().forEach(x => x.stop());
-      $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList.remove('hide'));
-      $('.usermedia > .stop-rec')[0].classList.add('hide');
-      machine.emit('changepage', 2);
+      machine.emit('changerecordingstate', false);
+      machine.emit('changepage', 2)
     }
   },
   '.download-mov': {
     click: function () {
       let link = document.createElement('a');
       link.download = 'video.webm';
-      link.href = videoURL.replace('video/webm', 'video/octet-stream');
-      link.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+      link.href = videoURL;
+      link.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}))
     }
   },
   '.discard-mov': {
     click: function () {
-      video.src = null;
-      machine.emit('changepage', 0)
+      video.srcObject = null;
+      machine.emit('changepage', 1);
+      $('.start-cam')[0].dispatchEvent(new Event('click'))
     }
   }
 })
   </script>
+  <noscript><h6>Only viewable with JavaScript enabled.</h6></noscript>
 </body>
 </html>
