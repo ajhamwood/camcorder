@@ -10,20 +10,19 @@ body {
   margin: 0;
   background: #ffdc00 }
 header {
-  height: 2rem;
   background: #ff4136;
   position: absolute;
-  width: calc(100% - 2rem);
+  width: calc(100% - 4rem);
   top: 0;
   font: bold large sans-serif;
-  padding: .5rem 0 0 2rem;
+  padding: .5rem 2rem;
   opacity: 0;
   z-index: -1;
   transition: opacity 1s }
 header.flash {
   transition: opacity 0s;
   opacity: 1 }
-article.start > * { margin-left: 2rem }
+section.start > * { margin-left: 2rem }
 h1 { font-size: 14vw }
 @media (min-width: 35rem) {
   h1 { font-size: 5rem } }
@@ -32,8 +31,11 @@ a {
   text-decoration: none;
   color: black;
   font-weight: bold;
-  transition: color .2s }
-a:hover { color: #660 }
+  border-bottom: 2px solid black;
+  transition: color .2s, border-color .2s }
+a:hover {
+  color: #660;
+  border-color: #660 }
 button {
   margin: 5px;
   background: black;
@@ -53,44 +55,36 @@ video {
 <body>
   <main>
     <header></header>
-    <article class="start">
+    <section class="start">
       <h1>Camcorder</h1>
       <p>Video recording one-page app by <a href="https://github.com/ajhamwood/camcorder">Aidan Hamwood</a>.</p>
       <button class="start-cam">Start camera</button>
-    </article>
-    <article class="usermedia hide">
+    </section>
+    <section class="usermedia hide">
       <video muted></video
       ><button class="swap-cam">Switch camera</button
       ><button class="start-rec">Start recording</button
       ><button class="stop-cam">Stop camera</button
       ><button class="stop-rec hide">Stop recording</button>
-    </article>
-    <article class="download hide">
+    </section>
+    <section class="download hide">
       <video controls></video
       ><button class="download-mov">Download video</button
       ><button class="discard-mov">Discard video</button>
-    </article>
+    </section>
   <script>
 //Utilities
-function $ (sel, node) { return Array.prototype.slice.call( (node || document).querySelectorAll(sel) ) }
-$.addEvents = function (obj, node) {
-  for (var q in obj) for (var e in obj[q])
-    for (var ns = q ? $(q, node) : [window, document], es = e.split(' '), i = 0; i < es.length; i++)
-      typeof ns === 'undefined' || ns.forEach(n => n.addEventListener(es[i], obj[q][e].bind(n))) };
-$.Machine = (function () {
-  let state, events = [], Machine = function (initialState) {
-    if (state) throw 'Machine already initialised';
-    else state = initialState;
-    return this
-  };
-  return Object.assign(Machine, {prototype: {
-    getState: function () { return state },
-    on: function (event, fn) { (events[event] = events[event] || []).push(fn); return this },
-    emit: function (event, ...args) { return events[event] && events[event].reduce((s, fn) => (fn.apply(s, args), s), state) },
-    stop: function (event, fname = '') { events[event] && events[event].splice(events[event].findIndex(fn => fn.name == fname), 1); return this },
-    constructor: Machine
-  }})
-})();
+var $ = Object.assign((sel, node = document) => [...node.querySelectorAll(sel).values()], {
+  Machine: function (state) {
+    let es = {}, v = Object.values, r = Promise.resolve.bind(Promise); Object.seal(state);
+    return Object.assign(this, {
+      getState () { return state },
+      on (e, fn) { (es[e] = es[e] || {})[fn.name] = fn; return this },
+      stop (e, fname = '') { e in es && delete es[e][fname]; return this },
+      emit (e, ...args) { return e in es && v(es[e]).reduce((s, fn) => (fn.apply(s, args), s), state) } }) },
+  queries (obj, node) {
+    for (let q in obj) for (let e in obj[q]) for (let ns = $(q, node) || [], es = e.split(' '), i = 0; i < es.length; i++)
+      ns.forEach(n => n.addEventListener(es[i], obj[q][e].bind(n))) } });
 
 //Usermedia
 function getCameras () {
@@ -108,19 +102,18 @@ function getCameras () {
 }
 
 function startMedia () {
-  if (navigator.mediaDevices.getUserMedia) {
-    return navigator.mediaDevices.getUserMedia({
-      video: { width: 6400, height: 4800, deviceId: { exact: cameras[0].deviceId } },
-      audio: { noiseSuppression: true }
-    }).then((s) => {
-      video.onloadedmetadata = () => video.play();
-      recorder = new MediaRecorder(video.srcObject = stream = s, { mimeType : 'video/webm' });
-      recorder.ondataavailable = e => {
-        let blob = new Blob([e.data], { type: 'video/webm' });
-        $('video')[1].src = videoURL = URL.createObjectURL(blob)
-      }
-    }).catch(e => { throw e.message })
-  } else throw 'Can\'t connect camera'
+  if ('mediaDevices' in navigator) return navigator.mediaDevices.getUserMedia({
+    video: { width: 6400, height: 4800, deviceId: { exact: cameras[0].deviceId } },
+    audio: { noiseSuppression: true }
+  }).then(s => {
+    video.onloadedmetadata = () => video.play();
+    recorder = new MediaRecorder(video.srcObject = stream = s, { mimeType : 'video/webm' });
+    recorder.ondataavailable = e => {
+      let blob = new Blob([e.data], { type: 'video/webm' });
+      $('video')[1].src = videoURL = URL.createObjectURL(blob)
+    }
+  }).catch(e => { throw e.message });
+  else throw 'Can\'t connect camera'
 }
 
 // Init
@@ -129,8 +122,8 @@ var cameras = [], stream, recorder, video = $('video')[0], videoURL, swap,
       .on('changepage', function (which) {
         if (~[0, 1, 2].indexOf(which)) {
           this.page = which;
-          $('article:not(.hide)')[0].classList.add('hide');
-          $('article')[which].classList.remove('hide')
+          $('section:not(.hide)')[0].classList.add('hide');
+          $('section')[which].classList.remove('hide')
         }
       })
       .on('changerecordingstate', function (state) {
@@ -148,7 +141,7 @@ var cameras = [], stream, recorder, video = $('video')[0], videoURL, swap,
       });
 
 //Events
-$.addEvents({
+$.queries({
   '.start-cam': {
     click: function () {
       getCameras().then(() => {
@@ -190,7 +183,7 @@ $.addEvents({
       let link = document.createElement('a');
       link.download = 'video.webm';
       link.href = videoURL;
-      link.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}))
+      link.dispatchEvent(new MouseEvent('click'))
     }
   },
   '.discard-mov': {
