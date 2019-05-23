@@ -73,7 +73,7 @@ video {
       ><button class="discard-mov">Discard video</button>
     </section>
   <script>
-//Utilities
+// Utilities
 var $ = Object.assign((sel, node = document) => [...node.querySelectorAll(sel).values()], {
   Machine: function (state) {
     let es = {}, v = Object.values, r = Promise.resolve.bind(Promise); Object.seal(state);
@@ -81,118 +81,120 @@ var $ = Object.assign((sel, node = document) => [...node.querySelectorAll(sel).v
       getState () { return state },
       on (e, fn) { (es[e] = es[e] || {})[fn.name] = fn; return this },
       stop (e, fname = '') { e in es && delete es[e][fname]; return this },
-      emit (e, ...args) { return e in es && v(es[e]).reduce((s, fn) => (fn.apply(s, args), s), state) } }) },
+      emit (e, ...args) { return e in es && v(es[e]).reduce((s, fn) => (fn.apply(s, args), s), state) },
+      emitAsync (e, ...args) { return e in es && v(es[e]).reduce((p, fn) => p.then(s => r(fn.apply(s, args)).then(() => s)), r(state)) } }) },
   queries (obj, node) {
     for (let q in obj) for (let e in obj[q]) for (let ns = $(q, node) || [], es = e.split(' '), i = 0; i < es.length; i++)
       ns.forEach(n => n.addEventListener(es[i], obj[q][e].bind(n))) } });
 
-//Usermedia
-function getCameras () {
-  return new Promise((resolve, reject) => {
-    if ('mediaDevices' in navigator) navigator.mediaDevices.enumerateDevices()
-      .then(is => cameras = is.filter(i => i.kind == 'videoinput')).then(resolve);
-    else reject('Camera not supported')
-  }).then(c => {
-    switch (c.length) {
-      case 0: throw 'Can\'t find a camera';
-      case 1: break;
-      default: swap = true
-    }
-  })
-}
+// App events
+var app = new $.Machine({
+      cameras: [],
+      stream: null,
+      recorder: null,
+      videoURL: null,
+      swap: false
+    })
 
-function startMedia () {
-  if ('mediaDevices' in navigator) return navigator.mediaDevices.getUserMedia({
-    video: { width: 6400, height: 4800, deviceId: { exact: cameras[0].deviceId } },
-    audio: { noiseSuppression: true }
-  }).then(s => {
-    video.onloadedmetadata = () => video.play();
-    recorder = new MediaRecorder(video.srcObject = stream = s, { mimeType : 'video/webm' });
-    recorder.ondataavailable = e => {
-      let blob = new Blob([e.data], { type: 'video/webm' });
-      $('video')[1].src = videoURL = URL.createObjectURL(blob)
-    }
-  }).catch(e => { throw e.message });
-  else throw 'Can\'t connect camera'
-}
-
-// Init
-var cameras = [], stream, recorder, video = $('video')[0], videoURL, swap,
-    machine = new $.Machine({ page: 0, recording: false })
-      .on('changepage', function (which) {
-        if (~[0, 1, 2].indexOf(which)) {
-          this.page = which;
-          $('section:not(.hide)')[0].classList.add('hide');
-          $('section')[which].classList.remove('hide')
+    .on('start-cam', function () {
+      new Promise((resolve, reject) => {
+        if ('mediaDevices' in navigator) navigator.mediaDevices.enumerateDevices()
+          .then(is => this.cameras = is.filter(i => i.kind === 'videoinput')).then(resolve);
+        else reject('Camera not supported')
+      }).then(c => {
+        switch (c.length) {
+          case 0: throw 'Can\'t find a camera';
+          case 1: break;
+          default: this.swap = true
         }
-      })
-      .on('changerecordingstate', function (state) {
-        $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList[state ? 'add' : 'remove']('hide'));
-        $('.usermedia > .stop-rec')[0].classList[state ? 'remove' : 'add']('hide')
-      })
-      .on('error', function (msg) {
-        console.log(msg);
-        machine.emit('changepage', 0);
-        stream && stream.getTracks().forEach(x => x.stop());
-        let h = $('header')[0];
-        h.innerText = msg;
-        h.classList.add('flash');
-        setTimeout(() => h.classList.remove('flash'), 5000)
-      });
+        app.emit('changepage', 1);
+        $('.swap-cam')[0].classList[this.swap ? 'remove' : 'add']('hide');
+        return app.emitAsync('start-media')
+      }).catch(e => app.emit('error', e))
+    })
 
-//Events
-$.queries({
-  '.start-cam': {
-    click: function () {
-      getCameras().then(() => {
-        machine.emit('changepage', 1);
-        $('.swap-cam')[0].classList[swap ? 'remove' : 'add']('hide')
-      }).then(startMedia).catch(e => machine.emit('error', e))
-    }
-  },
-  '.swap-cam': {
-    click: function () {
-      stream.getTracks().forEach(x => x.stop());
-      cameras.push(cameras.shift());
-      startMedia().catch(e => machine.emit('error', e))
-    }
-  },
-  '.stop-cam': {
-    click: function () {
-      machine.emit('changepage', 0);
-      stream.getTracks().forEach(x => x.stop());
-      video.srcObject = null
-    }
-  },
-  '.start-rec': {
-    click: function () {
-      machine.emit('changerecordingstate', true);
-      recorder.start()
-    }
-  },
-  '.stop-rec': {
-    click: function () {
-      recorder.stop();
-      stream.getTracks().forEach(x => x.stop());
-      machine.emit('changerecordingstate', false);
-      machine.emit('changepage', 2)
-    }
-  },
-  '.download-mov': {
-    click: function () {
+    .on('swap-cam', function () {
+      this.stream.getTracks().forEach(x => x.stop());
+      this.cameras.push(this.cameras.shift());
+      app.emitAsync('start-media').catch(e => app.emit('error', e))
+    })
+
+    .on('stop-cam', function () {
+      app.emit('changepage', 0);
+      this.stream.getTracks().forEach(x => x.stop());
+      $('video')[0].srcObject = null
+    })
+
+    .on('start-rec', function () {
+      app.emit('changerecordingstate', true);
+      this.recorder.start()
+    })
+
+    .on('stop-rec', function () {
+      this.recorder.stop();
+      this.stream.getTracks().forEach(x => x.stop());
+      app.emit('changerecordingstate', false);
+      app.emit('changepage', 2)
+    })
+
+    .on('download-mov', function () {
       let link = document.createElement('a');
       link.download = 'video.webm';
-      link.href = videoURL;
+      link.href = this.videoURL;
       link.dispatchEvent(new MouseEvent('click'))
-    }
-  },
-  '.discard-mov': {
-    click: function () {
-      video.srcObject = null;
-      machine.emit('changepage', 1);
-      $('.start-cam')[0].dispatchEvent(new Event('click'))
-    }
-  }
+    })
+
+    .on('start-media', function () {
+      if ('mediaDevices' in navigator) return navigator.mediaDevices.getUserMedia({
+        video: { width: 6400, height: 4800, deviceId: { exact: this.cameras[0].deviceId } },
+        audio: { noiseSuppression: true }
+      }).then(s => {
+        let video = $('video')[0];
+        video.onloadedmetadata = video.play;
+        this.recorder = new MediaRecorder(video.srcObject = this.stream = s, { mimeType : 'video/webm' });
+        this.recorder.ondataavailable = e => {
+          let blob = new Blob([e.data], { type: 'video/webm' });
+          $('video')[1].src = this.videoURL = URL.createObjectURL(blob)
+        }
+      }).catch(e => { throw e.message });
+      else throw 'Can\'t connect camera'
+    })
+
+    .on('changepage', function (which) {
+      if (~[0, 1, 2].indexOf(which)) {
+        $('section:not(.hide)')[0].classList.add('hide');
+        $('section')[which].classList.remove('hide')
+      }
+    })
+
+    .on('changerecordingstate', function (isRec) {
+      $('.usermedia > button:not(.stop-rec)').forEach(x => x.classList[isRec ? 'add' : 'remove']('hide'));
+      $('.usermedia > .stop-rec')[0].classList[isRec ? 'remove' : 'add']('hide')
+    })
+
+    .on('error', function (msg) {
+      console.log(msg);
+      app.emit('changepage', 0);
+      this.stream && this.stream.getTracks().forEach(x => x.stop());
+      let h = $('header')[0];
+      h.innerText = msg;
+      h.classList.add('flash');
+      setTimeout(() => h.classList.remove('flash'), 5000)
+    });
+
+// UI Events
+$.queries({
+  '.start-cam': { click () { app.emit('start-cam') } },
+  '.swap-cam': { click () { app.emit('swap-cam') } },
+  '.stop-cam': { click () { app.emit('stop-cam') } },
+  '.start-rec': { click () { app.emit('start-rec') } },
+  '.stop-rec': { click () { app.emit('stop-rec') } },
+  '.download-mov': { click () { app.emit('download-mov') } },
+  '.discard-mov': { click () {
+    $('video')[0].srcObject = null;
+    app.emit('changepage', 1);
+    $('.start-cam')[0].dispatchEvent(new Event('click'))
+  } }
 })
   </script>
   <noscript><h6>Only viewable with JavaScript enabled.</h6></noscript>
